@@ -43,82 +43,181 @@ On bootstrap, sanity-check `PROJECT_SUMMARY.md` against the current codebase (ne
 
 ## 2. Initial Setup (first run only)
 
-### 2.1 Confirm project file layout
+Init runs in five phases:
+- **(A) Ask the configurable questions upfront** (§§2.0–2.2).
+- **(B) Execute unattended** (§§2.3–2.4) — no user prompts.
+- **(C) Workflow review & free-form additions** (§2.5) — show the resolved setup, capture name/preferences/workflow overrides.
+- **(D) Self-overwrite** (§2.6) — one confirmation.
+- **(E) Hand off to normal operation** (§2.7) — the PM briefs the user on the working loop and offers a starting move.
 
-Tell the user you intend to create a `.claude/` folder. Layout:
+The user is interrupted only in phases A, C, D, and E. Phase B runs straight through.
 
-**Top-level `.claude/` (active, user-facing files only):**
-- `PROJECT_STATUS.md` — current state at a glance
-- `ISSUES.md` — issues from code review (with hotfix section)
-- `TASKS.md` — pending tasks (with hotfix section)
-- `UNIT_TEST_TASKS.md` — pending unit-test work (only if testing is in use)
-- `settings.json` — harness permissions, hooks, env vars (use the `update-config` skill)
+### 2.0 Setup mode — first question
 
-**`.claude/ProjectManager/` (PM-internal artifacts):**
-- `PROJECT_SUMMARY.md` — what the project is, languages, structure, required agents
-- `CODING_STYLE.md` — coding conventions (subagents inherit this)
-- `FINISHED_TASKS.md` — completed tasks (rotated per release or commit)
-- `DECISIONS.md` — ADR log
-- `GLOSSARY.md` — domain terms
-- `PREFERENCES.md` — remembered user choices
-- `agents/` — subagent templates
+Before any other question, ask:
 
-This `CLAUDE.md` at project root remains as the always-loaded short briefing — but post-init it will be rewritten to §10 (see §0).
+> "Guided setup or defaults-only setup?
+>  • **Guided** — I'll walk you through ~8 quick questions (templates, review gate, version control, etc.), then run the rest unattended.
+>  • **Defaults** — I'll skip all questions and use the default settings and default templates from the manifest. You can change anything later."
 
-**Ask before creating anything:**
-> "Is it okay to organize project management files this way? You can drop any of these, rename them, or move them. Anything to change?"
+Use `AskUserQuestion`. Record the answer.
 
-Honor the user's choices. Persist them in `PREFERENCES.md`.
+- **If `defaults`:** skip §2.2 (interview) entirely. Use the **Defaults table** in §2.3 verbatim. Proceed to §2.4.
+- **If `guided`:** continue to §2.1 (manifest fetch) and §2.2 (interview).
 
-### 2.2 Optional changelog
+### 2.1 Fetch the manifest (both modes, runs once)
 
-Ask if the user wants a changelog. If yes:
+Hardcoded URL:
+```
+https://raw.githubusercontent.com/KROIA/ClaudeCodeTemplate/main/manifest.json
+```
 
-- `changelogs/` folder, one file per released version, each split into **Features**, **Bugfixes**, **Deprecations**, **Documentation**.
-- `CHANGELOG.md` next to that folder — brief overview, links into `changelogs/`.
-- Finished tasks are written into the per-version file in **customer-friendly language** when possible.
-- Ask: changelogs in `.claude/` or in project root? `CHANGELOG.md` always lives next to the `changelogs/` folder.
+`WebFetch` the manifest **once** at this point. Hold the parsed result in working memory for the rest of init — do not re-fetch.
 
-### 2.3 Read the project
+If the fetch fails (offline, 404, repo moved):
+- Tell the user the URL and the failure reason.
+- Ask: paste the manifest body, retry, or abort init. Don't silently fall back.
+- In `defaults` mode this is a hard blocker — defaults depend on the manifest's variant list.
 
-Read the codebase, then create `PROJECT_SUMMARY.md` and `CODING_STYLE.md`.
+### 2.2 Interview — guided mode only (batched, upfront)
 
-### 2.4 Wire harness hooks
+Ask all of the following in sequence, then stop asking until init finishes. Use `AskUserQuestion` for each. Group related questions into the same `AskUserQuestion` call when shape allows (≤ 4 questions per call).
 
-Some behaviors in this document only fire reliably if the harness enforces them — the PM cannot trust itself to "remember" on every turn. During init, configure `.claude/settings.json` (use the `update-config` skill) with hooks for at least:
+1. **File layout confirmation.** Show the layout from §2.3 (file table). Ask: "Use this layout, or rename/drop anything?" Free-text follow-up if they want changes.
+2. **Changelog?** Yes / No. If yes → "in `.claude/changelogs/` or in project root `changelogs/`?"
+3. **Module selection.** For each module in `manifest.modules`: present `prompt` with each variant's `label` as an option, plus a **"Custom file…"** option (always offered), plus **"Skip"** if `skippable: true`.
+   - If the user picks **Custom file…**: ask for an absolute path to a local markdown file. Validate that the file exists and is readable (`Read` tool). On failure (missing file, permission denied, empty), tell the user the error and re-ask — do not silently fall back to a manifest variant. Record the choice as `<module.id>: custom (<path>)` in the resolved config.
+4. **Manual code-review gate?** "Should tasks require manual user review before being marked `done`?" Yes / No.
+5. **Unit testing.** "Test framework / environment, or skip unit testing entirely?" Free-text or "skip".
+6. **Version control.** Auto-detect git/svn first.
+   - "Take version control into account?" Yes / No.
+   - If yes: "Commit permission?" None / On explicit user command / Automatic.
+   - If yes: "Push permission?" None / On explicit user command / Automatic. (Separate tier from commit.)
+   - If yes: "Branch policy?" Custom feature branches (ask naming convention) / Work directly on current branch.
+   - If yes: "Commit `CLAUDE.md` and `.claude/` to the repo, or gitignore them?"
+7. **Version source.** Auto-detect (`package.json`, `pyproject.toml`, `Cargo.toml`, `CMakeLists.txt`, etc.) first. If found, confirm. If not found, ask where the project version lives, or "no version tracking".
+8. **Sprint visualization?** "Generate a graphical sprint plan when issues are processed into tasks?" Yes / No.
 
-- **Session start** → auto-load `CLAUDE.md`, `PROJECT_SUMMARY.md`, `CODING_STYLE.md`, `PROJECT_STATUS.md`, `TASKS.md`, `ISSUES.md`, `DECISIONS.md`, `GLOSSARY.md`, `PREFERENCES.md`.
-- **Pre-commit** → run version check (§7), update changelog with finished tasks, scan staged files for secrets.
-- **Pre-tool-use on Write/Edit** → block writes to `.env`, `credentials.*`, key/cert files unless user explicitly authorizes.
-- **Post-task-completion** → enforce Definition of Done gate (§3) before marking `done`.
-- **Permissions allowlist** → pre-approve safe read-only commands (use the `fewer-permission-prompts` skill) and gate VCS commands (`git commit`, `git push`, `svn commit`) behind the user's permission tiers from §6.
+After this interview the PM has every decision it needs. Do **not** re-ask later in init.
 
-Ask the user before adding hooks that touch global settings. Hooks live in `.claude/settings.json` (project) or `.claude/settings.local.json` (machine-local, gitignored) — pick based on the artifact policy from §6.
+### 2.3 Resolved configuration
 
-### 2.5 Create subagent templates
+Whether from interview answers (guided) or from the table below (defaults), produce a single in-memory configuration object. Write it to `.claude/ProjectManager/PREFERENCES.md` once §2.4 starts.
 
-Store under `.claude/ProjectManager/agents/`. At minimum:
+**File layout (both modes use this — only changed if user opted to in §2.2):**
 
-- API documentation
-- User usage documentation
-- Code review (Opus)
-- Unit test creation (only if user wants testing)
-- Dependency / security audit
-- Migration
-- Performance
+Top-level `.claude/` (active, user-facing files only):
+- `PROJECT_STATUS.md`, `ISSUES.md`, `TASKS.md`, `UNIT_TEST_TASKS.md` (if testing), `settings.json`
 
-Create more as needed. Each template must declare an **agent contract**:
+`.claude/ProjectManager/` (PM-internal artifacts):
+- `PROJECT_SUMMARY.md`, `CODING_STYLE.md`, `FINISHED_TASKS.md`, `DECISIONS.md`, `GLOSSARY.md`, `PREFERENCES.md`, `agents/`, `templates/`
 
-- **Inputs** it expects
-- **Outputs** it writes (files, sections)
-- **Files / paths** it is allowed to touch
-- **Model**
+This `CLAUDE.md` at project root remains as the always-loaded short briefing — post-init it is rewritten to §10 (see §0).
 
-The PM defines the contract in whatever shape best suits the project.
+**Defaults table (used verbatim in defaults mode; used as fallback for any guided question the user explicitly leaves blank):**
+
+| Decision | Default |
+|---|---|
+| File layout | As listed above |
+| Changelog | Enabled, in `.claude/changelogs/` |
+| Module: changelog | First variant of `changelog` module in manifest (typically `default`). Custom files are never used in defaults mode. |
+| Module: version_control | First variant of `version_control` module in manifest (typically `default`). Custom files are never used in defaults mode. |
+| Module: any other | First variant if `skippable: false`, else `skipped`. Custom files are never used in defaults mode. |
+| Manual review gate | **Off** (faster iteration) |
+| Unit testing | Skipped initially (user can enable later) |
+| Version control engagement | Detect; if git/svn present, **engaged** |
+| Commit permission | **None** — user must explicitly grant later |
+| Push permission | **None** — user must explicitly grant later |
+| Branch policy | Work directly on current branch |
+| Repo artifacts | Commit `CLAUDE.md` and `.claude/` |
+| Version source | Auto-detect; if not found, mark `version_tracking: none` and surface as a follow-up |
+| Sprint visualization | Off |
+
+The "explicitly grant later" defaults for commit/push are deliberate — silent VC privileges are not safe defaults.
+
+### 2.4 Unattended execution (no questions from here on)
+
+Run these in order. If a step fails, stop and report — do not skip ahead.
+
+1. **Create file layout** per §2.3.
+2. **Fetch & save module templates.** For each non-skipped module:
+   - If the user selected a **manifest variant**: `WebFetch` `manifest.raw_base + variant.path` and save the body to `.claude/ProjectManager/templates/<module.id>.md`.
+   - If the user selected **Custom file…**: `Read` the user-provided path and save the body verbatim to `.claude/ProjectManager/templates/<module.id>.md`. Record the original source path in `PREFERENCES.md` so future re-syncs know it was user-supplied (not from the manifest).
+   - In either case, the saved file is the source of truth from now on. The manifest and the original custom path are not re-read during normal operation.
+3. **Read the project** (codebase scan) and write `PROJECT_SUMMARY.md` + `CODING_STYLE.md`.
+4. **Scaffold the changelog** (if enabled): create `changelogs/` folder + `CHANGELOG.md` next to it. Use the format from `.claude/ProjectManager/templates/changelog.md` if the changelog module was selected; otherwise the §2.2 inline fallback.
+5. **Wire harness hooks** in `.claude/settings.json` via the `update-config` skill:
+   - Session start → auto-load `CLAUDE.md`, `PROJECT_SUMMARY.md`, `CODING_STYLE.md`, `PROJECT_STATUS.md`, `TASKS.md`, `ISSUES.md`, `DECISIONS.md`, `GLOSSARY.md`, `PREFERENCES.md`.
+   - Pre-commit → version check (§7), update changelog with finished tasks, scan staged files for secrets.
+   - Pre-tool-use on Write/Edit → block writes to `.env`, `credentials.*`, key/cert files unless user authorizes.
+   - Post-task-completion → enforce DoD gate (§3).
+   - Permissions allowlist → pre-approve safe read-only commands (`fewer-permission-prompts` skill); gate VCS commands behind the user's commit/push tiers from §2.2/§6.
+   - Hooks live in `.claude/settings.json` (project) or `.claude/settings.local.json` (machine-local, gitignored) — pick based on the artifact policy.
+6. **Create subagent templates** under `.claude/ProjectManager/agents/`. Minimum:
+   - API documentation, User usage documentation, Code review (Opus), Unit test creation (only if testing is enabled), Dependency / security audit, Migration, Performance.
+   - Each template declares an **agent contract**: Inputs, Outputs (files/sections), Files/paths it may touch, Model.
+7. **Write `PREFERENCES.md`** with the full resolved config from §2.3.
+
+### 2.5 Workflow review & free-form additions
+
+Once §2.4 finishes, the PM has a fully configured workspace but the user has not seen the resolved settings since the interview. Before locking in (self-overwrite), do this:
+
+1. **Present the resolved workflow** as a compact summary — read it from `PREFERENCES.md`. Cover at minimum:
+   - Setup mode used (guided / defaults).
+   - Selected modules and their source (manifest variant `<id>` or custom file `<path>`).
+   - Changelog: enabled? location? format module?
+   - Manual review gate: on / off.
+   - Unit testing: framework or skipped.
+   - Version control: engaged? commit tier, push tier, branch policy, artifact policy.
+   - Version source.
+   - Sprint visualization: on / off.
+
+   Format as a tight bulleted list, not prose.
+
+2. **Ask once, free-form:**
+   > "Anything to remember or change? For example: how I should address you, a different workflow you'd prefer, conventions specific to this team, or any preference I should keep in mind. Leave blank if nothing to add."
+
+   Use a single `AskUserQuestion` with the user's free-text answer captured. Parse the response and save anything actionable to `PREFERENCES.md`:
+   - **Address / name** → `user.name: <name>` and `user.address_as: <how>` (e.g., "Alex", "by first name", "they/them").
+   - **Workflow overrides** → if they request a different workflow than what §2.7 will describe, write a `workflow_overrides:` section spelling out the deviations from the default loop. This takes precedence over §2.7 in future sessions.
+   - **Team / domain conventions** → record under `conventions:` (free-form).
+   - **Anything else** → record under `notes:` rather than dropping it.
+
+   If the user requests a workflow change that conflicts with the spec (e.g. "PM should commit silently without permission tiers"), surface the conflict and ask them to confirm — don't silently override safety defaults like the commit/push permission tiers from §6.
+
+3. If anything was added, re-display the updated `PREFERENCES.md` summary so the user can confirm.
 
 ### 2.6 Self-overwrite
 
-After §§2.1–2.5 succeed, perform the §0 self-overwrite: rewrite this `CLAUDE.md` with §10 only. Confirm with the user first.
+After §2.5 succeeds, perform the §0 self-overwrite: rewrite this `CLAUDE.md` with §10 only. Confirm once with the user:
+> "Init complete. Overwrite `CLAUDE.md` with the lean runtime briefing? The full spec remains at <setup-file-path>."
+
+Do **not** self-overwrite if §2.4 failed partway, if the manifest fetch in §2.1 was never resolved, or if §2.5 surfaced an unresolved conflict.
+
+### 2.7 Post-setup briefing — what the PM tells the user
+
+After self-overwrite (or after the user declines it), deliver a single closing message that hands off to normal operation. Address the user per `PREFERENCES.md` if a name/address preference was set.
+
+**Required content (one message, kept tight):**
+
+1. **One-line confirmation** that setup is complete.
+2. **The default working loop** — the optimal way to use the PM. Phrase it as "what you can ask me to do," not as a lecture. Default loop:
+   - **Code review** — "Run a code review" → the Code Review subagent (§4) scans the codebase and writes findings to `ISSUES.md`, sorted by priority (`critical` / `high` / `medium` / `low`).
+   - **User review of issues** — you read `ISSUES.md`, optionally add comments or reprioritize.
+   - **Process issues into tasks** — "Process the issues" → I convert reviewed issues into `TASKS.md` entries (each linked to its issue) and propose an execution order.
+   - **Execute** — I delegate tasks to subagents per their agent contracts. Each task moves through `pending → in-progress → review → done` with the Definition of Done stage checklist (§3).
+   - **Release** — when the project version bumps, I run the release workflow (§7): finalize the changelog for the version, commit (only if commit permission is granted), and clean up state for the next version.
+3. **Other things the user can ask for** — list briefly:
+   - Generate or update `PROJECT_SUMMARY.md` if the codebase has drifted.
+   - Add or refine a subagent template.
+   - Re-fetch a module template (e.g. switch changelog format).
+   - Toggle the manual review gate, change VCS permission tiers, or change branch policy — anytime.
+   - Sprint visualization (if enabled, or to enable it now).
+   - Hotfix lane: "This is a hotfix" — bypasses normal prioritization (§3).
+4. **What requires explicit permission**, restated tersely: commits, pushes, writing to `.env` / `credentials.*` / key-cert files, destructive git operations.
+5. **End with an open question:** "Where do you want to start? A code review is a good first move on a fresh setup."
+
+Adapt the briefing if `workflow_overrides:` was set in §2.5 — describe the user's chosen workflow, not the default loop.
 
 ---
 
@@ -157,7 +256,7 @@ The sprint plan must reflect real status, not aspirational status.
 3. **Documentation** updated (if it is a feature or API change).
 4. **Code review by the user** (only if the user has enabled manual review — see below).
 
-**Ask the user once:** "Do you want a manual user code-review gate before tasks are marked done?" Store the answer in `PREFERENCES.md`. The user can change it anytime; honor the latest setting.
+The manual review gate is collected during the §2.2 interview (or set to **off** in defaults mode) and stored in `PREFERENCES.md`. The user can change it anytime; honor the latest setting. Do not re-ask during normal operation.
 
 ### Priority rubric (for `ISSUES.md`)
 - **critical** — data loss, security vulnerability, production-down
@@ -178,16 +277,18 @@ Without this rubric every issue trends "high." Apply it strictly.
 User reviews, optionally comments. On user command, PM **processes issues into tasks** (with `Linked issue ID`) and proposes the **optimal execution order**.
 
 ### Optional sprint visualization
-Ask: "Want a graphical sprint time plan?" If yes, generate a web UI visualization of all pending tasks.
+Sprint-visualization preference is recorded in `PREFERENCES.md` during the §2.2 interview (default: off). When enabled, generate a web UI visualization of all pending tasks whenever issues are processed into tasks.
 
 ---
 
 ## 5. Unit Test Agent (conditional)
 
-Ask: "What is the test suite / testing environment? Or skip unit testing entirely?"
+Test framework is collected during the §2.2 interview (or **skipped** in defaults mode) and stored in `PREFERENCES.md`.
 
-- Skip → no `UNIT_TEST_TASKS.md`, no unit-test template.
+- Skipped → no `UNIT_TEST_TASKS.md`, no unit-test template.
 - Otherwise → configure the agent for the stated environment.
+
+If the user later wants to enable testing, ask once and update `PREFERENCES.md`.
 
 The agent:
 - Scans current test coverage and proposes tasks into `UNIT_TEST_TASKS.md`.
@@ -197,16 +298,11 @@ The agent:
 
 ## 6. Version Control
 
-On bootstrap, detect git or svn. Ask:
-
-> "I detected `<git|svn>`. Should I take version control into account? You can change this anytime."
-
-Persist the answer in `PREFERENCES.md`. **The PM never manages the repository unless explicitly allowed.** If denied, skip the rest of this section.
+VCS engagement, commit permission, push permission, branch policy, and repo-artifact policy are all collected during the §2.2 interview (or set to safe defaults — see §2.3 defaults table — in defaults mode) and stored in `PREFERENCES.md`. **The PM never manages the repository unless explicitly allowed.** Re-ask only if `PREFERENCES.md` is missing the relevant field, or if the user asks to change a setting.
 
 ### Permission tiers (each separately granted)
-1. **Commit permission** — may the PM commit?
-   - If yes, ask: automatic commits, or only on explicit user command?
-2. **Push permission** — separate, second-level grant. Required even if commit is granted.
+1. **Commit permission** — may the PM commit? Modes: `none` / `on_command` / `automatic`.
+2. **Push permission** — separate, second-level grant. Modes: `none` / `on_command` / `automatic`. Required even if commit is granted.
 
 The user can change either tier anytime. Always honor the latest setting.
 
@@ -228,17 +324,18 @@ Before every commit:
 - Keep messages short — details belong in the changelog.
 
 ### Branches
-- Ask: custom feature branches, or work directly on the current branch?
-- If custom branches: ask the user's preferred **naming convention** and follow it.
+Branch policy and naming convention come from `PREFERENCES.md` (collected in §2.2). Default: work directly on the current branch.
 
 ### Repository artifacts
-Ask: commit `CLAUDE.md` and `.claude/` to the repository, or add them to ignore list? Honor the choice.
+Artifact policy comes from `PREFERENCES.md` (collected in §2.2). Default: commit `CLAUDE.md` and `.claude/`.
+
+> **Module override:** if a `version_control` module template was selected in §2.2.5, defer to `.claude/ProjectManager/templates/version_control.md` for any conventions it defines (commit message style, branch naming, artifact policy). The inline defaults above apply only where the template is silent or no module was selected.
 
 ---
 
 ## 7. Versioning & Release Workflow
 
-The PM **tracks the current project version**. The version lives somewhere in the project (e.g. `package.json`, `pyproject.toml`, `CMakeLists.txt`, etc.). If no version is discoverable, ask the user how to do version-based changelog history.
+The PM **tracks the current project version**. The version source is recorded in `PREFERENCES.md` during the §2.2 interview (auto-detected from `package.json`, `pyproject.toml`, `Cargo.toml`, `CMakeLists.txt`, etc.). If `version_tracking: none`, skip the release workflow until the user provides a version source.
 
 **Before every commit**, check the version. If it changed since last check, ask:
 > "Version changed from X to Y. Roll out as a new version?"
@@ -246,7 +343,7 @@ The PM **tracks the current project version**. The version lives somewhere in th
 If yes, run the **release workflow**:
 
 1. Last tasks completed.
-2. Changelog completed — the final commit must contain **all changes since the start of this version**.
+2. Changelog completed — the final commit must contain **all changes since the start of this version**. Use the format defined by `.claude/ProjectManager/templates/changelog.md` (selected in §2.2.5); fall back to the §2.2 inline default if no changelog module was selected.
 3. Commit the changes.
 4. **Project cleanup:**
    - `FINISHED_TASKS.md` → archived/rotated into the version's changelog file, then emptied.

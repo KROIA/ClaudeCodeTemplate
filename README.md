@@ -9,6 +9,8 @@ Für die Verwendung einer der Vorlagen in diesem ordner, werden folgende Schritt
 
 Claude wird selbständig das Projekt aufsetzen und während des Setups bestimmte Dinge fragen, die relevant für das Aufsetzen sind.
 
+> **Internetzugang nötig beim Init:** Während der Einrichtung lädt Claude eine `manifest.json` aus diesem Repo (`https://raw.githubusercontent.com/KROIA/ClaudeCodeTemplate/main/manifest.json`) sowie die ausgewählten Modul-Templates (Changelog, Versionskontrolle, …) über `WebFetch` nach. Die Templates werden einmalig in `.claude/ProjectManager/templates/` abgelegt und sind danach offline verfügbar.
+
 ---
 
 ## Vorlagen
@@ -30,3 +32,13 @@ Die Datei [`ClaudeProjectManagerSetup/CLAUDE.md`](./ClaudeProjectManagerSetup/CL
 - Release-Workflow mit automatischer Versionserkennung, Changelog-Pflege (Features / Bugfixes / Deprecations) und Projekt-Cleanup.
 - Konflikt- und Fehlerbehandlung für Subagenten, strikte Secrets-Policy.
 - **Selbstüberschreibung nach Init:** Nach abgeschlossener Einrichtung ersetzt der Projektmanager den Inhalt der `CLAUDE.md` durch eine schlanke Runtime-Briefing-Version, damit nicht in jeder Session die komplette Setup-Spezifikation in den Kontext geladen wird.
+
+---
+
+## Changelog
+
+Alle Änderungen am Projekt sind versionsweise in [`changelogs/`](./changelogs/) dokumentiert. Format: per-Version-Dateien folgen dem **Default**-Changelog-Template aus diesem Repo (Tabellen mit Badge-Tags). Authoring-Regeln siehe [`ChangelogTemplates/Default.md`](./ChangelogTemplates/Default.md).
+
+| Version | Datum | Highlights |
+|---|---|---|
+| [0.1.0](./changelogs/0.1.0.md) | 2026-05-07 | Initial release — modulares Manifest, zwei Changelog-Templates, Default-Versionskontroll-Template, Guided/Defaults-Setup, Post-Setup-Workflow-Briefing. |
