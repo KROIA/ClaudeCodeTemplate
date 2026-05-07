@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "repo": "https://github.com/KROIA/ClaudeCodeTemplate",
+  "raw_base": "https://raw.githubusercontent.com/KROIA/ClaudeCodeTemplate/main/",
+  "modules": [
+    {
+      "id": "changelog",
+      "title": "Changelog format",
+      "prompt": "Which changelog template should this project use?",
+      "skippable": true,
+      "variants": [
+        {
+          "id": "default",
+          "label": "Default (sectioned tables, badge tags)",
+          "description": "Per-version files with top-level sections (Security, Performance, API, ...) and inline tag badges.",
+          "path": "ChangelogTemplates/Default.md"
+        },
+        {
+          "id": "minimal",
+          "label": "Minimal (plain markdown, drop empty sections)",
+          "description": "Plain markdown only — headings and bullets, no tables or badges. Sections with zero entries are omitted.",
+          "path": "ChangelogTemplates/Minimal.md"
+        }
+      ]
+    },
+    {
+      "id": "version_control",
+      "title": "Version control conventions",
+      "prompt": "Which version-control template should this project use?",
+      "skippable": true,
+      "variants": [
+        {
+          "id": "default",
+          "label": "Default",
+          "description": "Default conventions for commit messages, branches, and release flow.",
+          "path": "VersionControlTemplates/Default.md"
+        }
+      ]
+    }
+  ]
+}
