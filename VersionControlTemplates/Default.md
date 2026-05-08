@@ -11,60 +11,84 @@ Git-flavored throughout. SVN notes are inline where behavior differs.
 ### Subject line
 
 ```
-<type>: <short summary>
+<short summary>
 ```
 
-- **Type prefix** — single character, mandatory:
+- **No type prefix on the subject.** The subject is plain text. Type prefixes (`+`, `~`, `-`) appear only on body entries (see below).
+- **Summary** — imperative mood, lowercase start, no trailing period, ≤ 60 chars.
+- **One coherent change per commit.** If a change touches unrelated areas, split the commit. The body breakdown shows the type mix; the subject names the overall change.
+- The body's type set is:
   - `+` new feature / new capability / new file
   - `~` change to existing behavior or content (refactor, bugfix, docs update, tweak, improvement)
   - `-` removal / deletion
-- **Summary** — imperative mood, lowercase start, no trailing period, ≤ 60 chars.
-- **One type per commit.** If a change spans types, pick the dominant one or split the commit.
 
 Examples:
 ```
-+ add cursor pagination to /v2/search
-~ extract retry policy into RetryConfig
-~ fix N+1 query in /users endpoint
-~ document release workflow in README
-- drop Node 18 support
+add cursor pagination to /v2/search
+extract retry policy into RetryConfig
+drop Node 18 support
+tighten commit-type set in default version-control template
 ```
 
 ### Body (optional)
 
 - Blank line after subject.
-- Wrap at 72 chars.
-- Explain **why**, not what. The diff shows what.
-- Reference issues/tasks: `Refs #412`, `Closes #87`, `Linked-Issue: ISSUE-23`.
-- For grouped changes, mirror the changelog category split (Security / Performance / API / …) as bullet sub-headings.
-- **Every change summary inside the body must start with a type prefix** from the same set used in the subject (`+`, `~`, `-`). One prefix per bullet, single character, no colon. The body is allowed to mix prefixes even though the subject is restricted to the dominant one — that is the whole point of the body breakdown.
+- **Keep it compact.** No prose paragraphs explaining the change — the bullets and their sub-bullets carry the meaning. Wrap at 72 chars.
+- For grouped changes, mirror the changelog category split (Security / Performance / API / …) as plain-text sub-headings (no prefix on the heading line itself, e.g. `API:`).
+- **Every entry — top-level and sub-bullet alike — starts with a type prefix** from the set `+`, `~`, `-`. One prefix per entry, single character, no colon.
+- **The type prefix IS the list character.** Never stack a markdown dash in front of it. Write `+ add foo`, never `- + add foo`, and never use a bare `-` as a generic list bullet — `-` always means *removal*.
+- Sub-bullets do **not** inherit the parent's type. Each sub-bullet carries its own prefix reflecting what that line is — usually `+` (added detail/clarification) or `~` (rationale/note about a change), and `-` only when the sub-point is itself a removal.
+- Issue references and breaking-change declarations are body entries, not a separate footer. Prefix them like any other entry — typically `~`.
+- **Never reference an issue without describing what was actually done for it.** A bare `Closes #412` is not enough — the reader should not have to open the tracker to learn what changed. Either:
+  - inline the issue ID into the entry that resolves it: `~ retry on 503 instead of 500 (closes #412)`, or
+  - use the dedicated form `~ #412: <short description of the fix>` — the issue ID first, then a colon, then a short description.
 
-Example body:
+Example (correct):
 
 ```
 + add cursor pagination to /v2/search
+  + cursor encoding is opaque base64; clients must not parse it
 ~ extract retry policy into RetryConfig
-~ fix N+1 query in /users endpoint
-- drop Node 18 support
+  ~ shared between /v2/search and /v2/users for consistency
+- remove /v1/search
+~ #412: retry on 503 instead of 500 in the search request layer
 ```
 
-Sub-bullets (rationale, migration notes) inherit their parent's prefix and do not need their own:
+Wrong:
 
 ```
-- drop Node 18 support
-  - matches our minimum supported runtime in the docs since 1.3
+- + add cursor pagination to /v2/search    ← double prefix on top level
++ add cursor pagination to /v2/search
+  - cursor encoding is opaque base64       ← bare `-` used as list bullet,
+                                              but the sub-point is not a removal
 ```
-
-### Footer (optional)
-
-- `Breaking-Change: <description>` — required for any change tagged `![breaking]` in the changelog.
-- `Co-Authored-By: <name> <email>` — when applicable.
 
 ### What does NOT belong in commit messages
 
+- Prose paragraphs (the "why" is captured in entry wording and sub-bullets).
 - Implementation walkthroughs (use the changelog's `<details>` block).
 - Author tool attribution unless the user has explicitly opted in.
 - "WIP", "fix typo in last commit", "address review comments" — squash these before merging.
+
+### Full example
+
+```
+overhaul the /v2/search endpoint and retire its v1 sibling
+
+API:
++ add cursor pagination to /v2/search
+  + cursor encoding is opaque base64; clients must not parse it
+~ extract retry policy into RetryConfig
+  ~ shared between /v2/search and /v2/users for consistency
+- remove /v1/search
+
+Build & Dependencies:
+~ bump openssl to 3.2.1
+
+~ Breaking-Change: /v1/search now returns 410 Gone; clients must migrate to /v2/search
+```
+
+Note: subject is plain text (no prefix), every entry — top-level and sub-bullet — starts with one of `+ ~ -` as its list character, body is grouped by changelog category, and breaking-change / issue refs are just body lines with their own prefix (no separate footer).
 
 ---
 
@@ -137,7 +161,7 @@ The release workflow (§7 of the PM spec) interacts with version control:
 4. Tag the release commit: `git tag -a v<version> -m "Release <version>"`. Annotated tags only — lightweight tags lose author/date metadata.
 5. Merge `release/<version>` into `main` (merge commit, no squash — preserve the release-prep history).
 6. Push `main` and the tag (only if push permission is granted).
-7. Open the next version: bump the version file, commit `~ open v<next> development`.
+7. Open the next version: bump the version file, commit `open v<next> development`.
 
 ### Hotfix flow
 
@@ -165,7 +189,7 @@ If the project uses SVN instead of git:
 
 The Project Manager:
 
-- **Always** prefixes commits with the type chars from §1.
+- **Always** prefixes body entries (not subjects) with the type chars from §1.
 - **Never** commits without commit permission (PM spec §6).
 - **Never** pushes without push permission (separate tier, PM spec §6).
 - **Always** runs the pre-commit ritual from PM spec §6 (changelog update, finished-task move, version check, secret scan).
