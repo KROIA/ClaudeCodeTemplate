@@ -15,11 +15,9 @@ Git-flavored throughout. SVN notes are inline where behavior differs.
 ```
 
 - **Type prefix** — single character, mandatory:
-  - `+` new feature / new capability
-  - `~` change to existing behavior (refactor, tweak, improvement)
+  - `+` new feature / new capability / new file
+  - `~` change to existing behavior or content (refactor, bugfix, docs update, tweak, improvement)
   - `-` removal / deletion
-  - `!` bugfix
-  - `*` documentation, comments, non-code changes
 - **Summary** — imperative mood, lowercase start, no trailing period, ≤ 60 chars.
 - **One type per commit.** If a change spans types, pick the dominant one or split the commit.
 
@@ -27,9 +25,9 @@ Examples:
 ```
 + add cursor pagination to /v2/search
 ~ extract retry policy into RetryConfig
+~ fix N+1 query in /users endpoint
+~ document release workflow in README
 - drop Node 18 support
-! fix N+1 query in /users endpoint
-* document release workflow in README
 ```
 
 ### Body (optional)
@@ -39,6 +37,23 @@ Examples:
 - Explain **why**, not what. The diff shows what.
 - Reference issues/tasks: `Refs #412`, `Closes #87`, `Linked-Issue: ISSUE-23`.
 - For grouped changes, mirror the changelog category split (Security / Performance / API / …) as bullet sub-headings.
+- **Every change summary inside the body must start with a type prefix** from the same set used in the subject (`+`, `~`, `-`). One prefix per bullet, single character, no colon. The body is allowed to mix prefixes even though the subject is restricted to the dominant one — that is the whole point of the body breakdown.
+
+Example body:
+
+```
++ add cursor pagination to /v2/search
+~ extract retry policy into RetryConfig
+~ fix N+1 query in /users endpoint
+- drop Node 18 support
+```
+
+Sub-bullets (rationale, migration notes) inherit their parent's prefix and do not need their own:
+
+```
+- drop Node 18 support
+  - matches our minimum supported runtime in the docs since 1.3
+```
 
 ### Footer (optional)
 
@@ -122,7 +137,7 @@ The release workflow (§7 of the PM spec) interacts with version control:
 4. Tag the release commit: `git tag -a v<version> -m "Release <version>"`. Annotated tags only — lightweight tags lose author/date metadata.
 5. Merge `release/<version>` into `main` (merge commit, no squash — preserve the release-prep history).
 6. Push `main` and the tag (only if push permission is granted).
-7. Open the next version: bump the version file, commit `* open v<next> development`.
+7. Open the next version: bump the version file, commit `~ open v<next> development`.
 
 ### Hotfix flow
 
