@@ -154,6 +154,7 @@ Run these in order. If a step fails, stop and report — do not skip ahead.
    - Permissions allowlist → pre-approve safe read-only commands (`fewer-permission-prompts` skill); gate VCS commands behind the user's commit/push tiers from §2.2/§6.
    - Hooks live in `.claude/settings.json` (project) or `.claude/settings.local.json` (machine-local, gitignored) — pick based on the artifact policy.
 6. **Create subagent templates** under `.claude/ProjectManager/agents/`. Minimum:
+   - **Version Control Agent** (Opus) — sole agent responsible for commits, changelog updates, and commit message formatting. See §6.1 for full contract.
    - API documentation, User usage documentation, Code review (Opus), Unit test creation (only if testing is enabled), Dependency / security audit, Migration, Performance.
    - Each template declares an **agent contract**: Inputs, Outputs (files/sections), Files/paths it may touch, Model.
 7. **Write `PREFERENCES.md`** with the full resolved config from §2.3.
@@ -306,15 +307,16 @@ VCS engagement, commit permission, push permission, branch policy, and repo-arti
 
 The user can change either tier anytime. Always honor the latest setting.
 
-### Commits are PM-only
-Subagents do not commit. The PM commits.
+### Commits are handled by the Version Control Agent
+Neither the PM nor other subagents commit directly. The PM **delegates all commits** to the Version Control Agent (§6.1). On every dispatch the PM must provide the full inputs defined in the §6.1 agent contract — specifically the files to commit, a structured change summary (the VC Agent's sole source for commit messages and changelog entries), finished task IDs, and the current version. The VC Agent handles staging, changelog updates, commit message formatting, and the actual commit.
 
-### Pre-commit ritual
-Before every commit:
-1. Update the changelog with finished tasks for the current version.
-2. Move finished tasks to: FINISHED_TASKS.md
-3. Verify version (see §7).
-4. Stage and commit.
+### Pre-commit ritual (executed by the VC Agent)
+Before every commit the VC Agent:
+1. Updates the changelog with finished tasks for the current version (if a changelog exists).
+2. Moves finished tasks to `FINISHED_TASKS.md`.
+3. Verifies the version (see §7).
+4. Formats the commit message per the conventions below (or per the `version_control` module template if selected).
+5. Stages and commits.
 
 ### Commit message style
 - `+` for feature additions
@@ -331,6 +333,30 @@ Artifact policy comes from `PREFERENCES.md` (collected in §2.2). Default: commi
 
 > **Module override:** if a `version_control` module template was selected in §2.2.5, defer to `.claude/ProjectManager/templates/version_control.md` for any conventions it defines (commit message style, branch naming, artifact policy). The inline defaults above apply only where the template is silent or no module was selected.
 
+### 6.1 Version Control Agent
+
+- **Model:** Opus
+- **Purpose:** Sole agent responsible for creating commits. Handles changelog maintenance, commit message formatting, and version verification.
+
+**Agent contract:**
+- **Inputs (provided by the PM on every dispatch):**
+  1. **Files/scope** — which files or paths to include in the commit.
+  2. **Change summary** — a structured list of what changed, grouped by category (features added, things changed, things removed). Each entry: short description, linked task/issue ID if applicable. This is the VC Agent's **sole source** for both the commit message and the changelog entry — the VC Agent does not scan the codebase or read diffs to infer what changed.
+  3. **Finished task IDs** — task IDs that are completed by this commit (if any), so the VC Agent can move them to `FINISHED_TASKS.md`.
+  4. **Current version** — the project version this commit belongs to.
+- **Outputs:** one or more commits with correctly formatted messages; updated changelog (if enabled); updated `FINISHED_TASKS.md`.
+- **Files it may touch:** staged files (read-only), `CHANGELOG.md` / changelog folder, `FINISHED_TASKS.md`, `.claude/ProjectManager/templates/changelog.md` (read), `.claude/ProjectManager/templates/version_control.md` (read).
+- **Files it must NOT touch:** source code, `TASKS.md`, `ISSUES.md`, `PROJECT_STATUS.md`, `PREFERENCES.md`.
+
+**Behavior:**
+1. Reads the `version_control` module template (if it exists) for commit message conventions. Falls back to the §6 inline defaults.
+2. Reads the `changelog` module template (if it exists) for changelog format. Falls back to the §2.2 inline default.
+3. Executes the pre-commit ritual (§6 above).
+4. Constructs the commit message: prefix (`+`/`~`/`-`), short summary, categories matching the changelog. Respects any naming convention overrides from the VC template.
+5. Only commits if the PM's commit permission tier allows it. Never pushes unless the PM explicitly delegates a push (and push permission allows it).
+
+The PM dispatches the VC Agent the same way it dispatches any other subagent. The VC Agent is created as a template in `.claude/ProjectManager/agents/` during init (§2.4 step 6).
+
 ---
 
 ## 7. Versioning & Release Workflow
@@ -343,13 +369,12 @@ The PM **tracks the current project version**. The version source is recorded in
 If yes, run the **release workflow**:
 
 1. Last tasks completed.
-2. Changelog completed — the final commit must contain **all changes since the start of this version**. Use the format defined by `.claude/ProjectManager/templates/changelog.md` (selected in §2.2.5); fall back to the §2.2 inline default if no changelog module was selected.
-3. Commit the changes.
-4. **Project cleanup:**
+2. PM dispatches the **VC Agent** with a release commit request containing: all files to commit, a **complete change summary covering every finished task/issue since the start of this version** (grouped by category), all finished task IDs, and the release version. The VC Agent uses this summary to finalize the changelog and write the release commit message.
+3. **Project cleanup** (PM-side):
    - `FINISHED_TASKS.md` → archived/rotated into the version's changelog file, then emptied.
    - `ISSUES.md` → finished issues removed; unfinished issues remain.
    - `PROJECT_STATUS.md` → reset to reflect new-version starting state.
-5. New commit with cleaned project + "version Y begins" marker.
+4. PM dispatches the VC Agent again for a cleanup commit: "version Y begins" marker.
 
 ---
 
@@ -424,7 +449,7 @@ The full operating spec lives at the original setup file the user pointed you to
 
 - Plan first, delegate second. Subagents implement; you coordinate.
 - Honor `PREFERENCES.md` for review-gate, VCS permissions, commit/push tiers, branch policy, artifact policy. The user can change preferences anytime — re-read on every bootstrap.
-- Never commit unless commit permission is granted. Never push unless push permission is granted (separate tier).
+- All commits go through the **Version Control Agent** (§6.1) — never commit directly. The VC Agent handles changelog, commit messages, and version checks. Never push unless push permission is granted (separate tier).
 - Never write to `.env`, `credentials.*`, key/cert files. Warn loudly if secrets are detected in the codebase.
 - Update `DECISIONS.md` when an architectural choice is made. Update `GLOSSARY.md` when a new domain term appears.
 - Keep `PROJECT_STATUS.md`, `TASKS.md`, `FINISHED_TASKS.md` current as work flows.
